@@ -19,30 +19,30 @@ lot_area_per_dus ={
     'C-3A': 300,
     'C-3B': 300,
 
-    'BA': 600,
-    'BA-1': 1200,
-    'BA-2': 600,
-    'BA-3': 1500,
-    'BA-4': 600,
+    # 'BA': 600,
+    # 'BA-1': 1200,
+    # 'BA-2': 600,
+    # 'BA-3': 1500,
+    # 'BA-4': 600,
     'BB': 300,
-    'BB-1': 300,
-    'BB-2': 300,
-    'BC': 500,
-    'BC-1': 450,
+    # 'BB-1': 300,
+    # 'BB-2': 300,
+    # 'BC': 500,
+    # 'BC-1': 450,
 
-    'O-1': 1200,
-    'O-2': 600,
-    'O-2A': 600,
-    'O-3': 300,
-    'O-3A': 300,
+    # 'O-1': 1200,
+    # 'O-2': 600,
+    # 'O-2A': 600,
+    # 'O-3': 300,
+    # 'O-3A': 300,
 
-    'IA-1': 700,
-    # 'IA-2': 1,
+    # 'IA-1': 700,
+    # # 'IA-2': 1,
 }
 floor_area_ratios = {
-    #'A-1': 0.5,
-    #'A-2': 0.5,
-    #'B': 0.5,
+    # 'A-1': 0.5,
+    # 'A-2': 0.5,
+    # 'B': 0.5,
     'C': 0.6,
     'C-1': 0.75,
     'C-1A': 1.25,
@@ -93,12 +93,26 @@ parcels.geometry = parcels.buffer(-1)
 zones = geopandas.read_file("CDD_ZoningDistricts.shp.zip").to_crs("EPSG:2249")
 zones = zones[zones.area > 5 * 43560]
 
-def units_in_zone(zone_type, geometry, station_only):
+assessing_parcels = geopandas.read_file("ASSESSING_ParcelsFY2023.shp.zip").to_crs("EPSG:2249")
+assessing_parcels.set_index("LOC_ID", inplace=True, verify_integrity=True)
+parcels = parcels.join(assessing_parcels, on="LOC_ID", how="left", rsuffix="_assessing")
+
+properties = pandas.read_csv("Filtered_Cambridge_Property_Database_FY2023.csv.zip")
+properties.fillna(0, inplace=True)
+properties['existing_units'] = properties.apply(lambda row: 1 if row['PropertyClass'] in ['CONDOMINIUM', 'CNDO LUX'] else row['Interior_NumUnits'], axis=1)
+properties = properties[['GISID', 'existing_units']].groupby('GISID').sum()
+parcels = parcels.join(properties, on="ML", how="left", rsuffix="_properties")
+
+print(zones['ZONE_TYPE'].unique())
+
+def units_in_zone(zone):
+    zone_type = zone['ZONE_TYPE']
+    district_parcels = parcels[parcels.geometry.within(zone.geometry)]
+    existing_units = district_parcels['existing_units'].sum()
     if zone_type not in lot_area_per_dus:
-        return 0
+        return [0, 0, district_parcels['existing_units'].sum()]
 
     # District parameters
-    district_parcels = parcels[parcels.geometry.within(geometry)]
     lot_area_per_du = lot_area_per_dus[zone_type]
     floor_area_ratio = floor_area_ratios[zone_type]
     unit_cap = 11
@@ -107,19 +121,28 @@ def units_in_zone(zone_type, geometry, station_only):
 
     # Calculate units
     total_units = 0
+    station_units = 0
     for _, parcel in district_parcels.iterrows():
         sqft = parcel['SQFT'] - parcel['Tot_Exclud']
         units = min(math.floor(sqft / lot_area_per_du), round(sqft * floor_area_ratio / 1000), unit_cap)
         if units < 3:
             continue
+        # if units <= parcel['existing_units']:
+        #     continue
+        # if parcel['existing_units'] > 20:
+        #     continue
+        # if units > 150 and zone_type in ['BA', 'BB', 'IA-1']:
+        #     print(units, zone_type, units / (sqft/43560),  parcel['Address'])
+        #     continue
+        #units -= min(units, parcel['existing_units'])
         # if units < 20:
         #     units = min(units, 9)
-        if not station_only or parcel['TRANSIT'] == 'N':
-            total_units += units
-    return total_units
+        total_units += units
+        if parcel['TRANSIT'] == 'N':
+            station_units += units
+    return [total_units, station_units, existing_units]
 
-zones['units'] = zones.apply(lambda row: units_in_zone(row['ZONE_TYPE'], row['geometry'], False), axis=1)
-zones['station_units'] = zones.apply(lambda row: units_in_zone(row['ZONE_TYPE'], row['geometry'], True), axis=1)
+zones[['units', 'station_units', 'existing_units']] = zones.apply(units_in_zone, axis=1, result_type='expand')
 zones['density_denominator'] = zones['geometry'].difference(density_deduct['geometry'].unary_union).area / 43560
 zones['density'] = zones['units'] / zones['density_denominator']
 
@@ -135,9 +158,11 @@ district = multifamily_zones[multifamily_zones['cumulative_density'] > 15]
 district = district.sort_values(by="station_units", ascending=False)
 district['cumulative_units'] = district['units'].cumsum()
 district['cumulative_station_units'] = district['station_units'].cumsum()
-idx = district.where(district['cumulative_station_units'] >= 12129).where(district['cumulative_units'] >= 13477).first_valid_index()
-if idx is not None:
-    district = district.loc[:idx]
+# idx = district.where(district['cumulative_station_units'] >= 12129).where(district['cumulative_units'] >= 13477).first_valid_index()
+# if idx is not None:
+#     district = district.loc[:idx]
+
+# print(district.where(district['ZONE_TYPE'] == 'C-1A')['density'])
 
 print("Subdistricts: %d" % len(district))
 print("Zones: ", ", ".join(sorted(district['ZONE_TYPE'].unique())))
@@ -154,7 +179,10 @@ if total_units >= 13477:
 else:
     print("[FAIL] Total units: %d" % total_units)
 
-station_area_acres = district['geometry'].unary_union.intersection(station_area.geometry.unary_union).area / 43560
+try:
+    station_area_acres = district['geometry'].unary_union.intersection(station_area.geometry.unary_union).area / 43560
+except:
+    station_area_acres = 0
 if station_area_acres >= 32 * 0.9:
     print("[PASS] Station area: %d acres" % station_area_acres)
 else:
@@ -181,8 +209,9 @@ else:
 
 # Plot the district
 origin = zones.unary_union.centroid
-ax = boundary.rotate(15, origin=origin).plot(figsize=(16*3,12*3), color='white', edgecolor='black', linewidth=2)
-district.rotate(15, origin=origin).plot(ax=ax, color='lightblue', edgecolor='black')
+ax = boundary.rotate(15, origin=origin).plot(figsize=(16,12), color='white', edgecolor='black', linewidth=2)
+district.where(district['ZONE_TYPE'] != 'BB').rotate(15, origin=origin).plot(ax=ax, color='lightblue', edgecolor='black')
+district.where(district['ZONE_TYPE'] == 'BB').rotate(15, origin=origin).plot(ax=ax, color='turquoise', edgecolor='black')
 station_area.rotate(15, origin=origin).plot(ax=ax, color='grey', alpha=0.5)
 
 ax.axis('off')
