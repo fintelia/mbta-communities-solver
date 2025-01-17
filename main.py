@@ -211,7 +211,7 @@ else:
 origin = zones.unary_union.centroid
 ax = boundary.rotate(15, origin=origin).plot(figsize=(16,12), color='white', edgecolor='black', linewidth=2)
 district.where(district['ZONE_TYPE'] != 'BB').rotate(15, origin=origin).plot(ax=ax, color='lightblue', edgecolor='black')
-district.where(district['ZONE_TYPE'] == 'BB').rotate(15, origin=origin).plot(ax=ax, color='turquoise', edgecolor='black')
+district.where(district['ZONE_TYPE'] == 'BB').rotate(15, origin=origin).plot(ax=ax, color='lightblue', edgecolor='black')
 station_area.rotate(15, origin=origin).plot(ax=ax, color='grey', alpha=0.5)
 
 ax.axis('off')
