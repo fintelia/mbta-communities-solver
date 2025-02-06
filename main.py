@@ -131,6 +131,9 @@ properties['existing_units'] = properties.apply(lambda row: 1 if row['PropertyCl
 properties = properties[['GISID', 'existing_units']].groupby('GISID').sum()
 parcels = parcels.join(properties, on="ML", how="left", rsuffix="_properties")
 
+print("Small parcels: %d" % len(parcels[parcels['SQFT'] < 5000]))
+print("Large parcels: %d" % len(parcels[parcels['SQFT'] >= 5000]))
+
 def units_in_zone(zone):
     zone_type = zone['ZONE_TYPE']
     district_parcels = parcels[parcels.geometry.within(zone.geometry)]
@@ -241,8 +244,9 @@ else:
 # Plot the district
 origin = zones.union_all().centroid
 ax = boundary.rotate(15, origin=origin).plot(figsize=(16,12), color='white', edgecolor='black', linewidth=2)
-district.where(district['ZONE_TYPE'] != 'BB').rotate(15, origin=origin).plot(ax=ax, color='lightblue', edgecolor='black')
-district.where(district['ZONE_TYPE'] == 'BB').rotate(15, origin=origin).plot(ax=ax, color='turquoise', edgecolor='black')
+zones.rotate(15, origin=origin).plot(ax=ax, color='lightgrey', edgecolor='black')
+# district.where(district['ZONE_TYPE'] != 'BB').rotate(15, origin=origin).plot(ax=ax, color='lightblue', edgecolor='black')
+# district.where(district['ZONE_TYPE'] == 'BB').rotate(15, origin=origin).plot(ax=ax, color='lightblue', edgecolor='black')
 station_area.rotate(15, origin=origin).plot(ax=ax, color='grey', alpha=0.5)
 
 ax.axis('off')
